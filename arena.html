@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pac-Man League · Arena</title>
+<style>
+  :root { --bg:#0b0f17; --card:#121826; --line:#1f2a3d; --text:#e6edf7; --muted:#8a97ad;
+          --pac:#f5b942; --ghost:#e5484d; --wall:#22304a; --floor:#0d1320; --food:#cbd5e1; --warn:#f0a04b; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display:flex; flex-direction:column; min-height:100vh; }
+  header { display:flex; align-items:center; gap:14px; padding:10px 18px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 14px 0 0; letter-spacing:.3px; white-space:nowrap; }
+  header .sub { color:var(--muted); font-size:12px; margin-left:auto; }
+  .tabs { display:flex; gap:6px; }
+  .tabs button { min-width:84px; }
+  .topbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px 18px; padding:10px 18px; border-bottom:1px solid var(--line); background:var(--card); }
+  .group { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .group > label { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; margin:0 4px 0 0; }
+  button, input[type=file] { font:inherit; color:var(--text); background:#0e1522; border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--pac); color:#1a1200; border-color:transparent; font-weight:600; }
+  button.active, .chip.active { border-color:var(--pac); color:var(--pac); }
+  button:disabled { opacity:.45; cursor:default; }
+  .chip { padding:5px 10px; font-size:13px; }
+  input[type=range] { width:120px; vertical-align:middle; }
+  main { display:grid; grid-template-columns:210px minmax(0,1fr) 210px; gap:12px; padding:12px 18px; flex:1; min-height:0; }
+  @media (max-width: 1000px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); margin:0 0 10px; }
+  .pane h2.pac { color:var(--pac); } .pane h2.gho { color:var(--ghost); }
+  .list { display:flex; flex-direction:column; gap:6px; max-height:calc(100vh - 230px); overflow:auto; }
+  .item { text-align:left; display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; }
+  .item .tag { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+  .item.sel { border-color:var(--pac); background:#1a2235; }
+  .pane.gho .item.sel { border-color:var(--ghost); }
+  .item.dim { opacity:.4; }
+  .centre { display:flex; flex-direction:column; gap:12px; min-width:0; }
+  .boardcard { display:flex; justify-content:center; align-items:center; padding:10px; }
+  canvas { display:block; background:var(--floor); border-radius:10px; }
+  .status { display:flex; flex-wrap:wrap; gap:6px 22px; font-variant-numeric:tabular-nums; }
+  .status div b { color:var(--muted); font-weight:500; display:block; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .big { font-size:18px; font-weight:600; }
+  .pac { color:var(--pac); } .gho { color:var(--ghost); }
+  .hint { margin-top:8px; padding:8px 10px; border-radius:8px; background:#0e1522; border:1px dashed var(--line); color:var(--muted); font-size:13px; }
+  .hint.need { border-color:var(--pac); color:var(--text); }
+  .result { margin-top:8px; padding:8px 10px; border-radius:8px; background:#0e1522; border:1px solid var(--line); font-weight:600; }
+  .log { margin-top:8px; height:96px; overflow:auto; font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted); white-space:pre; column-count:2; column-gap:18px; }
+  .log .f { color:var(--warn); }
+  .small { color:var(--muted); font-size:12px; }
+  .hidden { display:none !important; }
+  .kbd { display:inline-block; border:1px solid var(--line); border-bottom-width:2px; border-radius:5px; padding:0 6px; font:12px ui-monospace, Menlo, monospace; background:#0e1522; }
+  #rSlider { width:100%; margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pac-Man League · Arena</h1>
+  <div class="tabs">
+    <button id="tabLive" class="active" onclick="setMode('live')">Play</button>
+    <button id="tabReplay" onclick="setMode('replay')">Replay</button>
+  </div>
+  <span class="sub" id="serverNote">connecting…</span>
+</header>
+
+<!-- ------------------------------------------------------------- top bars -->
+<div class="topbar" id="liveBar">
+  <div class="group"><label>Board</label><span id="boardChips"></span></div>
+  <div class="group"><label>Fog</label><span id="fogChips"></span></div>
+  <div class="group"><label>Speed</label><input type="range" id="tickMs" min="80" max="400" step="10" value="120" oninput="document.getElementById('tickLabel').textContent=this.value"><span class="small"><span id="tickLabel">120</span> ms/tick</span></div>
+  <div class="group">
+    <button class="primary" id="btnStart" onclick="startLive()">Start</button>
+    <button id="btnPause" onclick="togglePause()" disabled>Pause</button>
+    <button id="btnDownload" onclick="downloadReplay()" disabled>Download replay</button>
+  </div>
+</div>
+<div class="topbar hidden" id="replayBar">
+  <div class="group"><input type="file" id="fileInput" multiple accept=".json" title="open replay files"></div>
+  <div class="group"><label>Board</label><span id="rBoardChips"></span></div>
+  <div class="group"><label>Fog</label><span id="rFogChips"></span></div>
+  <div class="group"><label>Speed</label><input type="range" id="rSpeed" min="60" max="600" step="10" value="160" oninput="document.getElementById('rSpeedLabel').textContent=this.value"><span class="small"><span id="rSpeedLabel">160</span> ms/tick</span></div>
+  <div class="group">
+    <button onclick="rStep(-1)">◀</button>
+    <button class="primary" id="rPlayBtn" onclick="rTogglePlay()">Play</button>
+    <button onclick="rStep(1)">▶</button>
+  </div>
+</div>
+
+<main>
+  <aside class="card pane pac"><h2 class="pac">Pac-Man</h2><div class="list" id="pacList"></div></aside>
+  <section class="centre">
+    <div class="card boardcard"><canvas id="board" width="630" height="450"></canvas></div>
+    <div class="card">
+      <div class="status">
+        <div><b>Tick</b><span class="big" id="sTick">–</span></div>
+        <div><b>Status</b><span class="big" id="sTurn">–</span></div>
+        <div><b class="pac">Pac-Man</b><span id="sPac">–</span></div>
+        <div><b class="gho">Ghost</b><span id="sGhost">–</span></div>
+        <div><b>Food</b><span id="sFood">–</span></div>
+        <div><b>Faults P / G</b><span id="sFaults">–</span></div>
+      </div>
+      <input type="range" id="rSlider" min="0" max="0" value="0" class="hidden" oninput="rSeek(+this.value)">
+      <div class="hint" id="hint">Pick a Pac-Man on the left, a ghost on the right, a board on top — then Start.</div>
+      <div class="result hidden" id="result"></div>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+  <aside class="card pane gho"><h2 class="gho">Ghost</h2><div class="list" id="ghostList"></div></aside>
+</main>
+
+<script>
+// ------------------------------------------------------------------ shared
+const $ = id => document.getElementById(id);
+const DIRS = {N:[-1,0], S:[1,0], E:[0,1], W:[0,-1]};
+const HOUSE = new Set(['baseline_pacman', 'baseline_ghost', 'random_ghost']);
+let mode = 'live', server = false;
+let board = null, view = null, fogSide = 'none';
+let lastSeen = {pacman:null, ghost:null};
+let labels = {pacman:'', ghost:''};
+let anim = {prev:null, cur:null, t0:0, dur:120};
+let catalogue = {agents:[], boards:[]};
+let sel = {pacman:'human', ghost:null, board:null, fog:'auto'};           // live selection
+let rsel = {pacman:null, ghost:null, board:null, fog:'none'};             // replay selection
+
+const key = (r,c) => r + ',' + c;
+function setBoard(b) { board = {rows:b.rows, cols:b.cols, walls:new Set(b.walls.map(x=>key(x[0],x[1]))), name:b.name}; lastSeen = {pacman:null, ghost:null}; }
+function visibleNow(v) { return Math.abs(v.pacman[0]-v.ghost[0]) + Math.abs(v.pacman[1]-v.ghost[1]) <= 6; }
+function legalDirs(pos) { const out = {}; for (const d in DIRS) { const n = [pos[0]+DIRS[d][0], pos[1]+DIRS[d][1]]; if (!board.walls.has(key(n[0], n[1]))) out[d] = n; } return out; }
+function setAnim(prevView, curView, dur) {
+  anim = {prev: prevView ? {pacman: prevView.pacman, ghost: prevView.ghost} : {pacman: curView.pacman, ghost: curView.ghost},
+          cur: {pacman: curView.pacman, ghost: curView.ghost}, t0: performance.now(), dur: Math.max(30, dur)};
+}
+function chips(holder, items, current, onPick) {
+  holder.innerHTML = '';
+  items.forEach(it => { const b = document.createElement('button'); b.className = 'chip' + (it.value === current ? ' active' : ''); b.textContent = it.label; b.onclick = () => onPick(it.value); holder.appendChild(b); });
+}
+function listItems(holder, items, current, onPick, cls) {
+  holder.innerHTML = '';
+  items.forEach(it => {
+    const b = document.createElement('button'); b.className = 'item' + (it.value === current ? ' sel' : '') + (it.dim ? ' dim' : '');
+    b.innerHTML = `<span>${it.label}</span><span class="tag">${it.tag || ''}</span>`; b.onclick = () => onPick(it.value); holder.appendChild(b);
+  });
+  if (!items.length) holder.innerHTML = '<div class="small">nothing here yet</div>';
+}
+function labelOf(name) { return name === 'human' ? 'you' : (name.startsWith('agent_') ? name.slice(6) : name); }
+function tagOf(name) { return name === 'human' ? 'keyboard' : (HOUSE.has(name) ? 'house' : 'student'); }
+
+// ---------------------------------------------------------------- drawing
+function lerp(a, b, t) { return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t]; }
+function draw() {
+  const cv = $('board'), ctx = cv.getContext('2d');
+  if (!board || !view) { ctx.clearRect(0,0,cv.width,cv.height); return; }
+  const holder = cv.parentElement;
+  const W = (holder.clientWidth || 600) - 20;
+  const H = Math.max(300, window.innerHeight - 330);
+  const cell = Math.max(8, Math.floor(Math.min(W / board.cols, H / board.rows)));
+  cv.width = cell * board.cols; cv.height = cell * board.rows;
+  cv.style.width = cv.width + 'px'; cv.style.height = cv.height + 'px';
+  const css = getComputedStyle(document.documentElement);
+  const C = n => css.getPropertyValue(n).trim();
+  ctx.fillStyle = C('--floor'); ctx.fillRect(0,0,cv.width,cv.height);
+  const foodSet = new Set(view.food.map(x=>key(x[0],x[1])));
+  for (let r=0;r<board.rows;r++) for (let c=0;c<board.cols;c++) {
+    const k = key(r,c), x = c*cell, y = r*cell;
+    if (board.walls.has(k)) { ctx.fillStyle = C('--wall'); ctx.fillRect(x+1,y+1,cell-2,cell-2); continue; }
+    if (foodSet.has(k)) { ctx.fillStyle = C('--food'); ctx.beginPath(); ctx.arc(x+cell/2, y+cell/2, Math.max(2, cell*.11), 0, Math.PI*2); ctx.fill(); }
+  }
+  const vis = visibleNow(view);
+  if (vis) { lastSeen.pacman = {pos:view.pacman, tick:view.tick}; lastSeen.ghost = {pos:view.ghost, tick:view.tick}; }
+  const t = anim.cur ? Math.min(1, (performance.now() - anim.t0) / anim.dur) : 1;
+  const pacPos = anim.cur ? lerp(anim.prev.pacman, anim.cur.pacman, t) : view.pacman;
+  const ghoPos = anim.cur ? lerp(anim.prev.ghost, anim.cur.ghost, t) : view.ghost;
+  const diamond = (me, color) => {
+    ctx.save(); ctx.globalAlpha = .10; ctx.fillStyle = color;
+    for (let r=0;r<board.rows;r++) for (let c=0;c<board.cols;c++)
+      if (Math.abs(r-me[0])+Math.abs(c-me[1]) <= 6 && !board.walls.has(key(r,c))) ctx.fillRect(c*cell, r*cell, cell, cell);
+    ctx.restore();
+  };
+  if (fogSide === 'pacman') diamond(view.pacman, C('--pac'));
+  else if (fogSide === 'ghost') diamond(view.ghost, C('--ghost'));
+  else { diamond(view.pacman, C('--pac')); diamond(view.ghost, C('--ghost')); }
+  const token = (pos, color, letter, alpha) => {
+    ctx.save(); ctx.globalAlpha = alpha;
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(pos[1]*cell+cell/2, pos[0]*cell+cell/2, cell*.40, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0b0f17'; ctx.font = `600 ${Math.max(10, cell*.42)}px -apple-system, Segoe UI, Roboto, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(letter, pos[1]*cell+cell/2, pos[0]*cell+cell/2+1);
+    ctx.restore();
+  };
+  const showGhost = fogSide !== 'pacman' || vis, showPac = fogSide !== 'ghost' || vis;
+  if (showPac) token(pacPos, C('--pac'), 'P', 1); else if (lastSeen.pacman) token(lastSeen.pacman.pos, C('--pac'), '?', .28);
+  if (showGhost) token(ghoPos, C('--ghost'), 'G', 1); else if (lastSeen.ghost) token(lastSeen.ghost.pos, C('--ghost'), '?', .28);
+}
+let rafOn = false;
+function frame() { draw(); if (rafOn) requestAnimationFrame(frame); }
+function startRaf() { if (!rafOn) { rafOn = true; requestAnimationFrame(frame); } }
+function stopRaf() { rafOn = false; }
+window.addEventListener('resize', draw);
+
+function showStatus(v, statusText) {
+  const cap = mode === 'replay' ? (rep.data && rep.data.rules && rep.data.rules.max_ticks) : live.maxTicks;
+  $('sTick').textContent = cap && cap < 100000 ? Math.min(v.tick, cap) + ' / ' + cap : v.tick;
+  $('sTurn').textContent = statusText || (v.done ? 'over' : 'playing');
+  $('sPac').textContent = labels.pacman + (v.pacman_score != null ? ` · ${v.pacman_score.toFixed(2)}` : '');
+  $('sGhost').textContent = labels.ghost + (v.ghost_score != null ? ` · ${v.ghost_score.toFixed(2)}` : '');
+  $('sFood').textContent = `${v.eaten} / ${v.total} eaten`;
+  $('sFaults').textContent = `${v.faults.pacman} / ${v.faults.ghost}`;
+}
+function logEvent(e) {
+  if (!e) return;
+  let s = `t${String(e.tick).padStart(3,' ')} ${e.who === 'pacman' ? 'P' : 'G'} ${e.skipped ? 'sits out' : (e.move||'—').padEnd(4,' ')}`;
+  if (!e.skipped && e.ms != null && e.ms > 0) s += ` ${String(Math.round(e.ms)).padStart(3,' ')} ms`;
+  if (e.ate) s += ' ate';
+  const el = document.createElement('div'); el.textContent = s;
+  if (e.fault) { el.className = 'f'; el.textContent += '  FAULT: ' + e.fault; }
+  const log = $('log'); log.appendChild(el);
+  while (log.childElementCount > 300) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ---------------------------------------------------------- catalogue / UI
+async function api(path, body) {
+  const r = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {});
+  return r.json();
+}
+async function init() {
+  try {
+    const l = await api('/api/list'); server = true; catalogue = l;
+    const students = l.agents.filter(a => a.kind === 'student').length;
+    $('serverNote').textContent = `${students} student agent${students === 1 ? '' : 's'} · ${l.boards.length} boards`;
+    sel.board = l.boards[0] || null;
+    const firstGhost = l.agents.find(a => a.kind === 'student') || l.agents.find(a => a.name === 'baseline_ghost');
+    sel.ghost = firstGhost ? firstGhost.name : 'human';
+    renderLive();
+    previewBoard();
+    loadServerReplays();
+  } catch (e) {
+    server = false;
+    $('serverNote').textContent = 'replays only — run  python arena.py  for live play';
+    $('tabLive').disabled = true;
+    setMode('replay');
+  }
+}
+function renderLive() {
+  const pacs = [{value:'human', label:'you', tag:'keyboard'}]
+    .concat(catalogue.agents.filter(a => a.side !== 'ghost').map(a => ({value:a.name, label:a.label, tag:a.kind})));
+  const ghosts = [{value:'human', label:'you', tag:'keyboard'}]
+    .concat(catalogue.agents.filter(a => a.side !== 'pacman').map(a => ({value:a.name, label:a.label, tag:a.kind})));
+  listItems($('pacList'), pacs, sel.pacman, v => { sel.pacman = v; renderLive(); if (!(live.id && view && !view.done)) { labels.pacman = labelOf(v); showStatus(view || {tick:1,eaten:0,total:0,faults:{pacman:0,ghost:0}}, 'ready'); } });
+  listItems($('ghostList'), ghosts, sel.ghost, v => { sel.ghost = v; renderLive(); if (!(live.id && view && !view.done)) { labels.ghost = labelOf(v); showStatus(view || {tick:1,eaten:0,total:0,faults:{pacman:0,ghost:0}}, 'ready'); } });
+  chips($('boardChips'), catalogue.boards.map(b => ({value:b, label:b})), sel.board, v => { sel.board = v; renderLive(); previewBoard(); });
+  chips($('fogChips'), [{value:'auto',label:'auto'},{value:'none',label:'none'},{value:'pacman',label:"Pac-Man's view"},{value:'ghost',label:"ghost's view"}], sel.fog,
+        v => { sel.fog = v; renderLive(); if (view && mode === 'live') { fogSide = effectiveFog(); draw(); } });
+}
+// show the selected board (start position) before a game starts
+async function previewBoard() {
+  if (!server || !sel.board) return;
+  if (live.id && view && !view.done) return;              // never disturb a running game
+  try {
+    const b = await api('/api/board?name=' + encodeURIComponent(sel.board));
+    if (b.error) return;
+    live.id = null; stopRaf();
+    setBoard(b);
+    view = {tick:1, pacman:b.pacman, ghost:b.ghost, food:b.food, eaten:0, total:b.food.length, faults:{pacman:0, ghost:0}, done:false};
+    labels = {pacman: labelOf(sel.pacman), ghost: labelOf(sel.ghost)};
+    fogSide = 'none'; setAnim(null, view, 100); draw(); showStatus(view, 'ready');
+  } catch (e) {}
+}
+function setMode(m) {
+  mode = m; stopLive(); rStop(); stopRaf();
+  $('tabLive').classList.toggle('active', m==='live'); $('tabReplay').classList.toggle('active', m==='replay');
+  $('liveBar').classList.toggle('hidden', m!=='live'); $('replayBar').classList.toggle('hidden', m!=='replay');
+  $('rSlider').classList.toggle('hidden', m!=='replay');
+  $('log').innerHTML=''; $('result').classList.add('hidden'); $('hint').className='hint';
+  if (m === 'live') { $('hint').textContent = 'Pick a Pac-Man on the left, a ghost on the right, a board on top — then Start.'; renderLive(); previewBoard(); }
+  else { $('hint').textContent = 'Open replay files (top left) or pick a game from the lists.'; renderReplayLists(); }
+}
+
+// ------------------------------------------------------------------- live
+let live = {id:null, paused:false, humans:{}, timer:null, busy:false, held:{pacman:[], ghost:[]}, maxTicks:300};
+function effectiveFog() {
+  if (sel.fog !== 'auto') return sel.fog;
+  const h = live.humans;
+  if (h.pacman && !h.ghost) return 'pacman';
+  if (h.ghost && !h.pacman) return 'ghost';
+  return 'none';
+}
+async function startLive() {
+  stopLive();
+  if (!sel.board || !sel.pacman || !sel.ghost) return;
+  const res = await api('/api/new', {pacman:sel.pacman, ghost:sel.ghost, board:sel.board});
+  if (res.error) { alert(res.error); return; }
+  live.id = res.id; live.humans = {pacman: sel.pacman==='human', ghost: sel.ghost==='human'}; live.paused = false;
+  live.maxTicks = res.rules ? res.rules.max_ticks : 300;
+  live.held = {pacman:[], ghost:[]};
+  labels = res.labels; setBoard(res.board); view = res.view; fogSide = effectiveFog();
+  setAnim(null, view, +$('tickMs').value);
+  $('log').innerHTML=''; $('result').classList.add('hidden');
+  $('btnPause').disabled = false; $('btnPause').textContent = 'Pause'; $('btnDownload').disabled = false;
+  const h = live.humans;
+  $('hint').className = 'hint need';
+  $('hint').textContent = h.pacman && h.ghost ? 'Hold arrows to move Pac-Man, W A S D to move the ghost. Go!'
+    : h.pacman ? 'Hold an arrow key to move Pac-Man; release to stop. No tick limit: eat everything or get caught. Go!'
+    : h.ghost ? 'Hold an arrow key to move the ghost; release to stop. No tick limit: catch Pac-Man before the food is gone. Go!'
+    : 'Agents are playing. P pauses.';
+  showStatus(view, 'playing'); startRaf();
+  live.timer = setTimeout(tick, +$('tickMs').value);
+}
+function stopLive() { if (live.timer) clearTimeout(live.timer); live.timer = null; }
+function moveFromKeys(side) {
+  const legal = legalDirs(view[side]), held = live.held[side];
+  const d = held.length ? held[held.length - 1] : null;
+  return (d && legal[d]) ? d : 'STOP';          // for a human ghost the server treats STOP as 'stay'
+}
+async function tick() {
+  live.timer = null;
+  if (!live.id || live.paused || (view && view.done) || live.busy) return;
+  live.busy = true;
+  const t0 = performance.now(), tickMs = +$('tickMs').value, prev = view;
+  try {
+    let res = await api('/api/turn', live.humans.pacman ? {id: live.id, move: moveFromKeys('pacman')} : {id: live.id});
+    logEvent(res.event); view = res.view;
+    if (!res.done) {
+      res = await api('/api/turn', (live.humans.ghost && res.needs === 'ghost') ? {id: live.id, move: moveFromKeys('ghost')} : {id: live.id});
+      logEvent(res.event); view = res.view;
+    }
+    setAnim(prev, view, tickMs);
+    showStatus(view, live.paused ? 'paused' : 'playing');
+    if (res.done) {
+      $('result').textContent = res.result_line; $('result').classList.remove('hidden');
+      $('hint').className = 'hint'; $('hint').textContent = 'Game over. Download the replay or start another game.';
+      $('btnPause').disabled = true; showStatus(view, 'over');
+      setTimeout(stopRaf, tickMs + 50);
+      return;
+    }
+  } finally { live.busy = false; }
+  if (!live.paused) live.timer = setTimeout(tick, Math.max(0, tickMs - (performance.now() - t0)));
+}
+function togglePause() {
+  if (!live.id || (view && view.done)) return;
+  live.paused = !live.paused; $('btnPause').textContent = live.paused ? 'Resume' : 'Pause';
+  showStatus(view, live.paused ? 'paused' : 'playing');
+  stopLive(); if (!live.paused) live.timer = setTimeout(tick, 0);
+}
+const ARROWS = {ArrowUp:'N', ArrowLeft:'W', ArrowDown:'S', ArrowRight:'E'};
+const WASD = {w:'N', a:'W', s:'S', d:'E', W:'N', A:'W', S:'S', D:'E'};
+function keySide(k) {
+  const h = live.humans;
+  const arrowSide = h.pacman ? 'pacman' : (h.ghost ? 'ghost' : null);
+  const wasdSide = (h.pacman && h.ghost) ? 'ghost' : arrowSide;
+  if (k in ARROWS && arrowSide) return [arrowSide, ARROWS[k]];
+  if (k in WASD && wasdSide) return [wasdSide, WASD[k]];
+  return null;
+}
+document.addEventListener('keydown', ev => {
+  if (mode !== 'live' || !live.id) return;
+  if (ev.key === 'p' || ev.key === 'P') { togglePause(); ev.preventDefault(); return; }
+  const ks = keySide(ev.key); if (!ks) return;
+  ev.preventDefault();
+  if (ev.repeat) return;
+  const [side, d] = ks;
+  live.held[side] = live.held[side].filter(x => x !== d).concat([d]);
+});
+document.addEventListener('keyup', ev => {
+  const ks = keySide(ev.key); if (!ks) return;
+  const [side, d] = ks;
+  live.held[side] = live.held[side].filter(x => x !== d);
+});
+window.addEventListener('blur', () => { live.held = {pacman:[], ghost:[]}; });
+function downloadReplay() {
+  if (!live.id) return;
+  const a = document.createElement('a'); a.href = `/api/replay?id=${live.id}`; a.download = `arena_${labels.pacman}_vs_${labels.ghost}_${board.name}.json`; a.click();
+}
+
+// ----------------------------------------------------------------- replay
+let rep = {data:null, idx:0, playing:false, handle:null, items:[], loaded:{}};
+function rStop() { rep.playing = false; if (rep.handle) clearTimeout(rep.handle); rep.handle = null; $('rPlayBtn').textContent = 'Play'; }
+function renderReplayLists() {
+  const uniq = k => [...new Set(rep.items.map(it => it[k]).filter(Boolean))].sort();
+  const pacs = uniq('pacman'), ghosts = uniq('ghost'), boards = uniq('board');
+  if (!pacs.includes(rsel.pacman)) rsel.pacman = pacs[0] || null;
+  // keep a pairing that exists: adjust ghost, then board
+  const withPac = rep.items.filter(it => it.pacman === rsel.pacman);
+  if (!withPac.some(it => it.ghost === rsel.ghost)) rsel.ghost = (withPac[0] || {}).ghost || null;
+  const pair = withPac.filter(it => it.ghost === rsel.ghost);
+  if (!pair.some(it => it.board === rsel.board)) rsel.board = (pair[0] || {}).board || null;
+  const ghostOk = new Set(withPac.map(it => it.ghost));
+  listItems($('pacList'), pacs.map(p => ({value:p, label:labelOf(p), tag:tagOf(p)})), rsel.pacman, v => { rsel.pacman = v; renderReplayLists(); });
+  listItems($('ghostList'), ghosts.map(g => ({value:g, label:labelOf(g), tag:tagOf(g), dim:!ghostOk.has(g)})), rsel.ghost, v => { rsel.ghost = v; renderReplayLists(); });
+  chips($('rBoardChips'), boards.map(b => ({value:b, label:b})), rsel.board, v => { rsel.board = v; renderReplayLists(); });
+  chips($('rFogChips'), [{value:'none',label:'none'},{value:'pacman',label:"Pac-Man's view"},{value:'ghost',label:"ghost's view"}], rsel.fog, v => { rsel.fog = v; renderReplayLists(); if (rep.data) rRender(true); });
+  const match = rep.items.find(it => it.pacman === rsel.pacman && it.ghost === rsel.ghost && it.board === rsel.board);
+  if (match && (!rep.data || rep.currentFile !== match.file)) openGame(match.file);
+}
+function loadReplay(data, file) {
+  rStop(); rep.data = data; rep.idx = 0; rep.currentFile = file;
+  labels = {pacman: labelOf(data.meta.pacman), ghost: labelOf(data.meta.ghost)};
+  setBoard(data.board); fogSide = rsel.fog;
+  $('rSlider').max = data.turns.length; $('rSlider').value = 0;
+  $('log').innerHTML = ''; $('result').classList.add('hidden');
+  $('hint').className = 'hint'; $('hint').textContent = `${labels.pacman} (Pac-Man) vs ${labels.ghost} (ghost) on ${data.board.name}. Play, step with ◀ ▶, or drag the slider.`;
+  rRender(true);
+}
+function rState(upto) {
+  const d = rep.data, b = d.board;
+  let pac = b.pacman.slice(), gho = b.ghost.slice(), food = new Set(b.food.map(x=>key(x[0],x[1])));
+  let faults = {pacman:0, ghost:0}, tick = 1;
+  lastSeen = {pacman:null, ghost:null};
+  for (let i=0;i<upto;i++) {
+    const e = d.turns[i];
+    if (Math.abs(pac[0]-gho[0])+Math.abs(pac[1]-gho[1]) <= 6) { lastSeen.pacman={pos:pac.slice(),tick:e.tick}; lastSeen.ghost={pos:gho.slice(),tick:e.tick}; }
+    if (e.who === 'pacman') { pac = e.to.slice(); if (e.ate) food.delete(key(pac[0],pac[1])); }
+    else { gho = e.to.slice(); }
+    if (e.fault) faults[e.who] += 1;
+    tick = e.tick + (e.who === 'ghost' ? 1 : 0);
+  }
+  const done = upto >= d.turns.length;
+  return {tick, pacman:pac, ghost:gho, food:[...food].map(k => k.split(',').map(Number)), eaten: b.food.length - food.size, total: b.food.length,
+          faults, done, pacman_score: done ? d.result.pacman_score : null, ghost_score: done ? d.result.ghost_score : null};
+}
+function rRender(jump) {
+  if (!rep.data) return;
+  const prev = view;
+  const s = rState(rep.idx); view = s; fogSide = rsel.fog;
+  setAnim(jump ? null : prev, s, rep.playing ? +$('rSpeed').value / 2 : 120);
+  showStatus(s, s.done ? 'over' : (rep.playing ? 'playing' : 'paused')); draw();
+  $('rSlider').value = rep.idx;
+  const log = $('log'); log.innerHTML = '';
+  for (let i=Math.max(0, rep.idx - 16); i<rep.idx; i++) logEvent(rep.data.turns[i]);
+  if (s.done) { const r = rep.data.result; $('result').textContent = `RESULT: ${r.outcome} Pac-Man ${r.pacman_score.toFixed(2)} ghost ${r.ghost_score.toFixed(2)} (${r.eaten}/${r.total} eaten in ${r.ticks} ticks)`; $('result').classList.remove('hidden'); }
+  else $('result').classList.add('hidden');
+}
+function rStep(d) { if (!rep.data) return; rStop(); rep.idx = Math.max(0, Math.min(rep.data.turns.length, rep.idx + d)); rRender(false); }
+function rSeek(v) { if (!rep.data) return; rStop(); rep.idx = v; rRender(true); }
+function rTogglePlay() {
+  if (!rep.data) return;
+  if (rep.playing) { rStop(); stopRaf(); return; }
+  if (rep.idx >= rep.data.turns.length) rep.idx = 0;
+  rep.playing = true; $('rPlayBtn').textContent = 'Pause'; startRaf();
+  const tickFn = () => {
+    if (!rep.playing) return;
+    if (rep.idx >= rep.data.turns.length) { rStop(); return; }
+    rep.idx += 1; rRender(false);
+    rep.handle = setTimeout(tickFn, +$('rSpeed').value / 2);
+  };
+  tickFn();
+}
+$('fileInput').addEventListener('change', async ev => {
+  const files = [...ev.target.files]; if (!files.length) return;
+  const items = [];
+  for (const f of files) { try { const d = JSON.parse(await f.text()); rep.loaded[f.name] = d; items.push({file:f.name, pacman:d.meta.pacman, ghost:d.meta.ghost, board:d.board.name, local:true}); } catch(e) {} }
+  rep.items = rep.items.filter(it => !it.local).concat(items);
+  if (items.length) { rsel.pacman = items[0].pacman; rsel.ghost = items[0].ghost; rsel.board = items[0].board; }
+  if (mode !== 'replay') setMode('replay'); else renderReplayLists();
+});
+async function loadServerReplays() {
+  try { const items = await api('/api/replays'); rep.items = rep.items.filter(it => it.local).concat(items); if (mode === 'replay') renderReplayLists(); } catch (e) {}
+}
+async function openGame(file) {
+  if (rep.loaded[file]) { loadReplay(rep.loaded[file], file); return; }
+  try { const d = await api('/api/replayfile?file=' + encodeURIComponent(file)); rep.loaded[file] = d; loadReplay(d, file); } catch (e) {}
+}
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); $('fileInput').files = e.dataTransfer.files; $('fileInput').dispatchEvent(new Event('change')); });
+
+init();
+</script>
+</body>
+</html>
